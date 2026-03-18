@@ -5,7 +5,7 @@ import warnings
 from scipy.cluster.hierarchy import ClusterWarning
 from scipy.spatial.distance import squareform
 from isosplit6 import isosplit6
-from .compute_pca_features_fixed import compute_pca_features # TODO: use .compute_pca_features_fixed when we want to do deterministic profiling runs
+from .compute_pca_features import compute_pca_features # TODO: use .compute_pca_features_fixed when we want to do deterministic profiling runs
 
 
 warnings.filterwarnings('ignore', category=ClusterWarning)
