@@ -24,5 +24,5 @@ def compute_pca_features(X: npt.NDArray[np.float32], *, npca: int):
     npca_2 = np.minimum(np.minimum(npca, L), D)
     if L == 0 or D == 0:
         return np.zeros((0, npca_2), dtype=np.float32)
-    pca = decomposition.PCA(n_components=npca_2)
+    pca = decomposition.PCA(n_components=npca_2, random_state=0)
     return pca.fit_transform(X)
