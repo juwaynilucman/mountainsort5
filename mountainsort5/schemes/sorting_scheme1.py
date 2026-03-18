@@ -182,7 +182,7 @@ def sorting_scheme1(
     # Now we need to make sure the times are in order, because we have offset them
     print('Sorting times')
     tt = Timer('sorting times')
-    sort_inds = np.argsort(times)
+    sort_inds = np.argsort(times, kind='stable') # FIX: Unstable sort caused jitter
     times = times[sort_inds]
     labels = labels[sort_inds]
     tt.report()
@@ -204,7 +204,7 @@ def sorting_scheme1(
         inds = np.where(labels == k)[0]
         if len(inds) == 0:
             aa[k - 1] = np.inf
-    new_labels_mapping = np.argsort(np.argsort(aa)) + 1 # too tricky! my head aches right now
+    new_labels_mapping = np.argsort(np.argsort(aa, kind='stable'), kind='stable') + 1 # FIX: applied stable sort here too
     labels = new_labels_mapping[labels - 1]
     tt.report()
 

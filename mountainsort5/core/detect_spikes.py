@@ -77,7 +77,7 @@ def detect_spikes(
 
     times = np.array(times, dtype=np.int32)
     channel_indices = np.array(channel_indices, dtype=np.int32)
-    inds = np.argsort(times)
+    inds = np.argsort(times, kind='stable') # FIX: Prevents random shuffling of exact ties
     times = times[inds]
     channel_indices = channel_indices[inds]
     return times, channel_indices
