@@ -34,7 +34,7 @@ def detect_spikes(
                 adjacency[m].append(m2)
     print('')
     print(f'Adjacency for detect spikes with channel radius {channel_radius}')
-    print(adjacency)
+    # print(adjacency)
     print('')
 
     inds1, inds2 = np.nonzero(traces <= -detect_threshold)
@@ -50,8 +50,8 @@ def detect_spikes(
     channel_indices = []
     for m in range(M):
         nbhd = adjacency[m]
-        if verbose:
-            print(f'm = {m} (nbhd size: {len(nbhd)})')
+        # if verbose: 
+            # print(f'm = {m} (nbhd size: {len(nbhd)})') # TODO: uncomment this later after finishing debugging
         indices = [0 for j in range(len(nbhd))]
         for i in range(len(candidate_times[m])):
             t = candidate_times[m][i]

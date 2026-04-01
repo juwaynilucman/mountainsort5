@@ -57,8 +57,7 @@ def sorting_scheme1(
     print(f'Number of channels: {M}')
     print(f'Number of timepoints: {N}')
     print(f'Sampling frequency: {sampling_frequency} Hz')
-    for m in range(M):
-        print(f'Channel {m}: {channel_locations[m]}')
+
 
     sorting_parameters.check_valid(M=M, N=N, sampling_frequency=sampling_frequency, channel_locations=channel_locations)
 
@@ -123,7 +122,6 @@ def sorting_scheme1(
     is_torch_features = type(features).__module__.startswith('torch')
     if is_torch_features:
         features = features.cpu().numpy()
-        # TODO: remove the next line after debugging
         times = times.cpu().numpy()
 
     print(f'Isosplit6 clustering with npca_per_subdivision={sorting_parameters.npca_per_subdivision}')

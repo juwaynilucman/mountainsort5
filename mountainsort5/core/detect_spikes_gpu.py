@@ -14,7 +14,7 @@ def detect_spikes(
     detect_sign: int,
     margin_left: int,
     margin_right: int,
-    verbose: bool = False
+    verbose: bool = True
 ) -> Tuple[npt.NDArray[np.int64], npt.NDArray[np.int32]]:
     """
     GPU-accelerated spike detection using PyTorch.
