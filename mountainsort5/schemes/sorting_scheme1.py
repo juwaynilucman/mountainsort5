@@ -24,7 +24,8 @@ class SortingSchemeExtraOutput:
 def sorting_scheme1(
     recording: si.BaseRecording, *,
     sorting_parameters: Scheme1SortingParameters,
-    return_extra_output: bool = False
+    return_extra_output: bool = False,
+    use_gpu: bool = False
 ):
     """MountainSort 5 sorting scheme 1
 
@@ -65,6 +66,14 @@ def sorting_scheme1(
     tt = Timer('load_traces')
     traces: np.ndarray = recording.get_traces()
     tt.report()
+
+    if use_gpu:
+        print("Moving traces to GPU .. ")
+        import torch
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU requested but not available.")
+        # traces = torch.tensor(traces, device='cuda')
+        traces = torch.as_tensor(traces, dtype=torch.float32, device='cuda')
 
     print('Detecting spikes')
     tt = Timer('detect_spikes')
@@ -111,6 +120,12 @@ def sorting_scheme1(
     features = compute_pca_features(snippets.reshape((L, T * M)), npca=npca)
     tt.report()
 
+    is_torch_features = type(features).__module__.startswith('torch')
+    if is_torch_features:
+        features = features.cpu().numpy()
+        # TODO: remove the next line after debugging
+        times = times.cpu().numpy()
+
     print(f'Isosplit6 clustering with npca_per_subdivision={sorting_parameters.npca_per_subdivision}')
     tt = Timer('isosplit6_subdivision_method')
     labels = isosplit6_subdivision_method(
@@ -126,6 +141,10 @@ def sorting_scheme1(
 
     print('Computing templates')
     tt = Timer('compute_templates')
+    is_torch_snippets = type(snippets).__module__.startswith('torch')
+    if is_torch_snippets:
+        snippets = snippets.cpu().numpy()
+
     templates = compute_templates(snippets=snippets, labels=labels) # K x T x M
     peak_channel_indices = [int(np.argmin(np.min(templates[i], axis=0))) for i in range(K)]
     tt.report()
@@ -150,6 +169,10 @@ def sorting_scheme1(
         tt = Timer('compute_pca_features')
         features = compute_pca_features(snippets.reshape((L, T * M)), npca=npca)
         tt.report()
+        
+        is_torch_features = type(features).__module__.startswith('torch')
+        if is_torch_features:
+            features = features.cpu().numpy()
 
         print(f'Isosplit6 clustering with npca_per_subdivision={sorting_parameters.npca_per_subdivision}')
         tt = Timer('isosplit6_subdivision_method')
@@ -228,11 +251,19 @@ def sorting_scheme1(
     else:
         return sorting
 
-def remove_duplicate_times(times: npt.NDArray, labels: npt.NDArray):
+def remove_duplicate_times(times, labels):
     if len(times) == 0:
         return times, labels
-    inds = np.where(np.diff(times) > 0)[0]
-    inds = np.concatenate([np.array([0]), inds + 1])
+        
+    is_torch = type(times).__module__.startswith('torch')
+    if is_torch:
+        import torch
+        inds = torch.where(torch.diff(times) > 0)[0]
+        inds = torch.cat([torch.tensor([0], device=times.device), inds + 1])
+    else:
+        inds = np.where(np.diff(times) > 0)[0]
+        inds = np.concatenate([np.array([0]), inds + 1])
+        
     times2 = times[inds]
     labels2 = labels[inds]
     return times2, labels2
