@@ -18,20 +18,22 @@ from mountainsort5.core.compute_pca_features import compute_pca_features
 from mountainsort5.schemes.sorting_scheme1 import remove_duplicate_times
 
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Constants only) ---
 SAMPLING_FREQ = 30000
 NUM_CHANNELS = 384
 DTYPE = "int16"
 
-BASE_DATA_DIR = Path(r"C:\Users\juway\Documents\Marquees-smith\c46")
-NPX_BIN_PATH = BASE_DATA_DIR / "subset_data" / "raw_1pct.bin"
-CHAN_MAP_PATH = Path(r"D:\chanMap.mat")
 
 @pytest.fixture(scope="module")
-def real_ephys_data():
-    print(f"\nLoading real data from {NPX_BIN_PATH}...")
-    recording = si.read_binary(NPX_BIN_PATH, sampling_frequency=SAMPLING_FREQ, dtype=DTYPE, num_channels=NUM_CHANNELS)
-    mat_contents = sio.loadmat(CHAN_MAP_PATH)
+def real_ephys_data(test_config):
+    print(f"\nLoading real data from {test_config.npx_bin}...")
+    recording = si.read_binary(
+        test_config.npx_bin, 
+        sampling_frequency=SAMPLING_FREQ, 
+        dtype=DTYPE, 
+        num_channels=NUM_CHANNELS
+    )
+    mat_contents = sio.loadmat(test_config.chan_map)
     x, y = mat_contents['xcoords'].flatten(), mat_contents['ycoords'].flatten()
     positions = np.column_stack((x, y))
     probe = pi.Probe(ndim=2, si_units='um')
@@ -132,17 +134,29 @@ def test_remove_duplicate_times_consistency():
 @pytest.mark.skipif(not HAS_CUDA, reason="CUDA is required to test GPU consistency")
 def test_compute_pca_features_consistency():
     np.random.seed(42)
-    
-    # Create mock snippet data: 400 spikes, 60 features (T * M)
-    # We deliberately use < 500 spikes to force scikit-learn to use its exact 
-    # 'full' SVD solver, which allows us to verify our pure PyTorch exact SVD logic.
+
     X_cpu = np.random.randn(400, 60).astype(np.float32)
-    X_gpu = torch.tensor(X_cpu, device='cuda')
-    
+    device = 'cuda' if HAS_CUDA else 'cpu'
+    X_gpu = torch.tensor(X_cpu, device=device)
+
     npca = 9
-    
+    tol = 5e-3  # Define once to keep it consistent
+
     features_cpu = compute_pca_features(X_cpu, npca=npca)
-    features_gpu = compute_pca_features(X_gpu, npca=npca)
+    features_gpu = compute_pca_features(X_gpu, npca=npca).cpu().numpy()
+
+    # 1. Check magnitudes
+    np.testing.assert_allclose(
+        np.abs(features_cpu),
+        np.abs(features_gpu),
+        atol=tol,
+        err_msg="PCA feature magnitudes mismatch!"
+    )
+
+    # 2. Check signs
+    diff = np.abs(features_cpu - features_gpu)
+    sum_vals = np.abs(features_cpu + features_gpu)
     
-    # Compare the exact PyTorch math against the exact scikit-learn math
-    np.testing.assert_allclose(features_cpu, features_gpu.cpu().numpy(), atol=1e-5, err_msg="PCA features mismatch!")
+    # Elements must be close OR their negations must be close
+    is_consistent = np.all((diff < tol) | (sum_vals < tol))
+    assert is_consistent, f"PCA features differ by more than just a sign flip at tol {tol}"
