@@ -26,15 +26,16 @@ SAMPLING_FREQ = 30000
 NUM_CHANNELS = 384
 DTYPE = "int16"
 
-BASE_DATA_DIR = Path(r"C:\Users\juway\Documents\Marquees-smith\c46")
-NPX_BIN_PATH = BASE_DATA_DIR / "subset_data" / "raw_1pct.bin"
-CHAN_MAP_PATH = Path(r"D:\chanMap.mat")
+BASE_DATA_DIR = Path("/home/juwayni/neuropixel_recordings/marquees")
+NPX_BIN_PATH = BASE_DATA_DIR / "c46" / "subset_data" / "raw_1pct.bin"
+CHAN_MAP_PATH = BASE_DATA_DIR / "chanMap.mat"
 
 # --- Sorting Parameters ---
 SCHEME1_PARAMS = ms5.Scheme1SortingParameters(
     detect_channel_radius=150,
     detect_threshold=5.5,
     snippet_mask_radius=150,
+    skip_alignment=False
 )
 
 
@@ -77,9 +78,21 @@ def main():
     probe.set_device_channel_indices(np.arange(NUM_CHANNELS))
     recording = recording.set_probe(probe)
 
+    # --- NEW: Slice the recording for development ---
+    # Example 1: Grab the first 32 channels
+    chan_range = range(155, 167)  # 155:167
+    channels_to_keep = recording.get_channel_ids()[:]   # Adjust this range as needed for testing
+    
+    # Example 2: Grab specific channel IDs (if you know where a good unit is)
+    # channels_to_keep = [10, 11, 12, 13, 14, 15] 
+    
+    print(f"Slicing recording to {len(channels_to_keep)} channels for rapid testing...")
+    recording_sliced = recording.select_channels(channel_ids=channels_to_keep)
+
     print("Applying preprocessing (Filter + Whiten)...")
-    rec_filtered = spre.bandpass_filter(recording, freq_min=300, freq_max=6000, dtype='float32')
-    rec_preprocessed = spre.whiten(rec_filtered, seed=42)  # Deterministic whitening
+    # Make sure to use the sliced recording here!
+    rec_filtered = spre.bandpass_filter(recording_sliced, freq_min=300, freq_max=6000, dtype='float32')
+    rec_preprocessed = spre.whiten(rec_filtered, seed=42)
 
     # --- Run CPU Sorting ---
     print("\n" + "="*40)
@@ -205,6 +218,43 @@ def main():
             print("\n✅ SUCCESS: CPU and GPU outputs are 100% identical at the spike time level.")
         else:
             print("\n⚠️ WARNING: Differences found between CPU and GPU outputs.")
+
+
+    # Extract structured arrays of all spikes across all units
+    vector_cpu = sorting_cpu.to_spike_vector()
+    vector_gpu = sorting_gpu.to_spike_vector()
+
+    # Extract and sort just the timestamps (sample indices)
+    times_cpu = np.sort(vector_cpu['sample_index'])
+    times_gpu = np.sort(vector_gpu['sample_index'])
+
+    print(f"\nTotal clustered spikes (CPU): {len(times_cpu)}")
+    print(f"Total clustered spikes (GPU): {len(times_gpu)}")
+    print(f"CPU duplicates: {len(times_cpu) - len(np.unique(times_cpu))}")
+    print(f"GPU duplicates: {len(times_gpu) - len(np.unique(times_gpu))}")
+
+    if len(times_cpu) == len(times_gpu):
+        is_global_match = np.array_equal(times_cpu, times_gpu)
+        if is_global_match:
+            print("✅ The global set of clustered spikes is 100% identical (ignores unit assignments).")
+        else:
+            print("⚠️ The global sets of clustered spikes have different timestamps.")
+            unique_times_cpu = np.setdiff1d(times_cpu, times_gpu)
+            unique_times_gpu = np.setdiff1d(times_gpu, times_cpu)
+            print(f"  - Unique to CPU: {len(unique_times_cpu)} spikes")
+            print(f"  - Unique to GPU: {len(unique_times_gpu)} spikes") 
+            print(f'  - Example unique CPU spike times: {unique_times_cpu[:10]}')
+            print(f'  - Example unique GPU spike times: {unique_times_gpu[:10]}')
+            intersection = np.intersect1d(times_cpu, times_gpu)
+            intersection_fraction = len(intersection) / len(times_cpu) if len(times_cpu) > 0 else 0
+            print(f"  - Intersection of spike times: {len(intersection)} spikes ({intersection_fraction:.4f} of CPU spikes)")
+
+    else:
+        print("❌ The total number of clustered spikes differs.")
+        unique_times_cpu = np.setdiff1d(times_cpu, times_gpu)
+        unique_times_gpu = np.setdiff1d(times_gpu, times_cpu)
+        print(f"  - Unique to CPU: {len(unique_times_cpu)} spikes")
+        print(f"  - Unique to GPU: {len(unique_times_gpu)} spikes")
 
 if __name__ == "__main__":
     main()
