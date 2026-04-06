@@ -1,42 +1,74 @@
 import torch
 
-def compute_pca_features(X: torch.Tensor, *, npca: int) -> torch.Tensor:
-    """
-    Compute PCA features using pure PyTorch.
-    Includes deterministic sign-flipping to match the output of scikit-learn.
-    
-    Parameters
-    ----------
-    X : torch.Tensor
-        Input data (L x D).
-    npca : int
-        Desired number of PCA features.
-    """
-    L = X.shape[0]
-    D = X.shape[1]
-    npca_2 = min(npca, L, D)
+
+def _svd_flip_u_based(U: torch.Tensor, Vt: torch.Tensor):
+    idx = torch.argmax(torch.abs(U), dim=0)
+    signs = torch.sign(U[idx, torch.arange(U.shape[1], device=U.device)])
+    signs = torch.where(signs == 0, torch.ones_like(signs), signs)
+    U = U * signs
+    Vt = Vt * signs[:, None]
+    return U, Vt
+
+
+def _pick_solver_fast(n_samples: int, n_features: int, n_components: int) -> str:
+    # mirrors sklearn's broad structure, but tuned for a fast PyTorch port
+    if n_features <= 1000 and n_samples >= 10 * n_features:
+        return "covariance_eigh"
+    if max(n_samples, n_features) > 500 and n_components < 0.8 * min(n_samples, n_features):
+        return "randomized"
+    return "full"
+
+
+def compute_pca_features(
+    X: torch.Tensor,
+    *,
+    npca: int,
+    random_state: int = 0,
+) -> torch.Tensor:
+    L, D = X.shape
+    k = min(npca, L, D)
+
+    out_dtype = torch.float32 if X.dtype not in (torch.float32, torch.float64) else X.dtype
 
     if L == 0 or D == 0:
-        return torch.zeros((0, npca_2), dtype=torch.float32, device=X.device)
+        return torch.zeros((L, k), dtype=out_dtype, device=X.device)
+    if k == 0:
+        return torch.zeros((L, 0), dtype=out_dtype, device=X.device)
 
-    # 1. Center the data (scikit-learn always centers)
-    mean = torch.mean(X, dim=0)
-    X_centered = X - mean
+    Xw = X.to(out_dtype)
+    mean = Xw.mean(dim=0, keepdim=True)
+    Xc = Xw - mean
 
-    # 2. Singular Value Decomposition
-    # Using exact SVD (economy mode) to match sklearn's default full solver
-    U, S, Vh = torch.linalg.svd(X_centered, full_matrices=False)
+    solver = _pick_solver_fast(L, D, k)
 
-    # 3. Deterministic Sign Flip
-    # Matches scikit-learn's svd_flip ensuring the max absolute value
-    # in each column of U is positive.
-    max_abs_cols = torch.argmax(torch.abs(U), dim=0)
-    signs = torch.sign(U[max_abs_cols, torch.arange(U.shape[1])])
-    signs[signs == 0] = 1.0  # Handle edge cases of pure 0
-    U *= signs
+    if solver == "covariance_eigh":
+        # good when samples >> features
+        C = (Xc.mT @ Xc) / max(L - 1, 1)
+        eigvals, eigvecs = torch.linalg.eigh(C)
+        eigvecs = torch.flip(eigvecs, dims=[1])
+        Vt = eigvecs.mT[:k]
+        scores = Xc @ Vt.mT
+        return scores.to(torch.float32)
 
-    # 4. Transform data
-    # The projection onto principal components is U * S
-    X_transformed = U[:, :npca_2] * S[:npca_2]
+    if solver == "randomized":
+        # sklearn-like randomized path, but using PyTorch's fast built-in
+        # q slightly overestimates rank, which usually helps quality
+        q = min(k + 10, min(L, D))
+        if X.is_cuda:
+            torch.cuda.manual_seed_all(random_state)
+        torch.manual_seed(random_state)
 
-    return X_transformed
+        U, S, V = torch.pca_lowrank(Xc, q=q, center=False, niter=4)
+        U = U[:, :k]
+        S = S[:k]
+
+        idx = torch.argmax(torch.abs(U), dim=0)
+        signs = torch.sign(U[idx, torch.arange(k, device=U.device)])
+        signs = torch.where(signs == 0, torch.ones_like(signs), signs)
+        U = U * signs
+
+        return (U * S).to(torch.float32)
+
+    U, S, Vt = torch.linalg.svd(Xc, full_matrices=False)
+    U, Vt = _svd_flip_u_based(U, Vt)
+    return (U[:, :k] * S[:k]).to(torch.float32)
