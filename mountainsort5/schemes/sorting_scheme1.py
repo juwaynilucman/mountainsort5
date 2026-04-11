@@ -11,6 +11,11 @@ from ..core.extract_snippets import extract_snippets
 from ..core.isosplit6_subdivision_method import isosplit6_subdivision_method
 from ..core.compute_templates import compute_templates
 from ..core.compute_pca_features import compute_pca_features
+from ..core.align_templates import align_templates
+from ..core.align_snippets import align_snippets
+from ..core.offset_times import offset_times
+from ..core.determine_offsets_to_peak import determine_offsets_to_peak
+from ..core.remove_duplicate_times import remove_duplicate_times
 from ..core.Timer import Timer
 
 
@@ -139,12 +144,15 @@ def sorting_scheme1(
 
     print('Computing templates')
     tt = Timer('compute_templates')
-    is_torch_snippets = type(snippets).__module__.startswith('torch')
-    if is_torch_snippets:
-        snippets = snippets.cpu().numpy()
 
     templates = compute_templates(snippets=snippets, labels=labels) # K x T x M
-    peak_channel_indices = [int(np.argmin(np.min(templates[i], axis=0))) for i in range(K)]
+    is_torch_templates = type(templates).__module__.startswith('torch')
+    if is_torch_templates:
+        import torch
+        # Note: torch.min with dim=0 returns a namedtuple (values, indices)
+        peak_channel_indices = [int(torch.argmin(torch.min(templates[i], dim=0).values).item()) for i in range(K)]
+    else:
+        peak_channel_indices = [int(np.argmin(np.min(templates[i], axis=0))) for i in range(K)]
     tt.report()
 
     if not sorting_parameters.skip_alignment:
@@ -188,7 +196,12 @@ def sorting_scheme1(
         print('Computing templates')
         tt = Timer('compute_templates')
         templates = compute_templates(snippets=snippets, labels=labels) # K x T x M
-        peak_channel_indices = [int(np.argmin(np.min(templates[i], axis=0))) for i in range(K)]
+        is_torch_templates = type(templates).__module__.startswith('torch')
+        if is_torch_templates:
+            import torch
+            peak_channel_indices = [int(torch.argmin(torch.min(templates[i], dim=0).values).item()) for i in range(K)]
+        else:
+            peak_channel_indices = [int(np.argmin(np.min(templates[i], axis=0))) for i in range(K)]
         tt.report()
 
         print('Offsetting times to peak')
@@ -249,105 +262,4 @@ def sorting_scheme1(
     else:
         return sorting
 
-def remove_duplicate_times(times, labels):
-    if len(times) == 0:
-        return times, labels
-        
-    is_torch = type(times).__module__.startswith('torch')
-    if is_torch:
-        import torch
-        inds = torch.where(torch.diff(times) > 0)[0]
-        inds = torch.cat([torch.tensor([0], device=times.device), inds + 1])
-    else:
-        inds = np.where(np.diff(times) > 0)[0]
-        inds = np.concatenate([np.array([0]), inds + 1])
-        
-    times2 = times[inds]
-    labels2 = labels[inds]
-    return times2, labels2
 
-def align_templates(templates: npt.NDArray[np.float32]):
-    K = templates.shape[0]
-    # T = templates.shape[1]
-    # M = templates.shape[2]
-    offsets = np.zeros((K,), dtype=np.int32)
-    pairwise_optimal_offsets = np.zeros((K, K), dtype=np.int32)
-    pairwise_inner_products = np.zeros((K, K), dtype=np.float32)
-    for k1 in range(K):
-        for k2 in range(K):
-            offset, inner_product = compute_pairwise_optimal_offset(templates[k1], templates[k2])
-            pairwise_optimal_offsets[k1, k2] = offset
-            pairwise_inner_products[k1, k2] = inner_product
-    for passnum in range(20):
-        something_changed = False
-        for k1 in range(K):
-            weighted_sum = 0
-            total_weight = 0
-            for k2 in range(K):
-                if k1 != k2:
-                    offset = pairwise_optimal_offsets[k1, k2] + offsets[k2]
-                    weight = pairwise_inner_products[k1, k2]
-                    weighted_sum += weight * offset
-                    total_weight += weight
-            if total_weight > 0:
-                avg_offset = int(weighted_sum / total_weight)
-            else:
-                avg_offset = 0
-            if avg_offset != offsets[k1]:
-                something_changed = True
-                offsets[k1] = avg_offset
-        if not something_changed:
-            print('Template alignment converged.')
-            break
-    print('Align templates offsets: ', offsets)
-    return offsets
-
-
-def compute_pairwise_optimal_offset(template1: npt.NDArray[np.float32], template2: npt.NDArray[np.float32]):
-    T = template1.shape[0]
-    best_inner_product = -np.inf
-    best_offset = 0
-    for offset in range(T):
-        inner_product = np.sum(np.roll(template1, shift=offset, axis=0) * template2)
-        if inner_product > best_inner_product:
-            best_inner_product = inner_product
-            best_offset = offset
-    if best_offset > T // 2:
-        best_offset = best_offset - T
-    return best_offset, best_inner_product
-
-def align_snippets(snippets: npt.NDArray[np.float32], offsets: npt.NDArray, labels: npt.NDArray):
-    if len(labels) == 0:
-        return snippets
-    snippets2 = np.zeros_like(snippets)
-    for k in range(1, int(np.max(labels)) + 1):
-        inds = np.where(labels == k)[0]
-        snippets2[inds] = np.roll(snippets[inds], shift=offsets[k - 1], axis=1)
-    return snippets2
-
-def offset_times(times: npt.NDArray, offsets: npt.NDArray, labels: npt.NDArray):
-    if len(labels) == 0:
-        return times
-    times2 = np.zeros_like(times)
-    for k in range(1, int(np.max(labels)) + 1):
-        inds = np.where(labels == k)[0]
-        times2[inds] = times[inds] + offsets[k - 1]
-    return times2
-
-def determine_offsets_to_peak(templates: npt.NDArray[np.float32], *, detect_sign: int, T1: int):
-    K = templates.shape[0]
-
-    if detect_sign < 0:
-        A = -templates
-    elif detect_sign > 0: # pragma: no cover
-        A = templates # pragma: no cover
-    else:
-        A = np.abs(templates) # pragma: no cover
-
-    offsets_to_peak = np.zeros((K,), dtype=np.int32)
-    for k in range(K):
-        peak_channel = np.argmax(np.max(A[k], axis=0))
-        peak_time = np.argmax(A[k][:, peak_channel])
-        offset_to_peak = peak_time - T1
-        offsets_to_peak[k] = offset_to_peak
-    return offsets_to_peak

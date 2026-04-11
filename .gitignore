@@ -131,3 +131,11 @@ dmypy.json
 
 # Mac
 .DS_Store
+
+# local/editor
+.claude/
+.vscode/
+**/.vscode/
+
+# generated outputs
+cpu_vs_gpu_agreement.png
