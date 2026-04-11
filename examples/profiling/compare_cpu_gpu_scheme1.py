@@ -26,9 +26,9 @@ SAMPLING_FREQ = 30000
 NUM_CHANNELS = 384
 DTYPE = "int16"
 
-BASE_DATA_DIR = Path("/home/juwayni/neuropixel_recordings/marquees")
+BASE_DATA_DIR = Path(r"C:\Users\juway\Documents\Marquees-smith")
 NPX_BIN_PATH = BASE_DATA_DIR / "c46" / "subset_data" / "raw_1pct.bin"
-CHAN_MAP_PATH = BASE_DATA_DIR / "chanMap.mat"
+CHAN_MAP_PATH = Path(r"D:\chanMap.mat")
 
 # --- Sorting Parameters ---
 SCHEME1_PARAMS = ms5.Scheme1SortingParameters(
