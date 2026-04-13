@@ -33,7 +33,7 @@ def detect_spikes(
             if (channel_radius is None) or (dist0 <= channel_radius):
                 adjacency[m].append(m2)
     print('')
-    print(f'Adjacency for detect spikes with channel radius {channel_radius}')
+    # print(f'Adjacency for detect spikes with channel radius {channel_radius}')
     # print(adjacency)
     print('')
 

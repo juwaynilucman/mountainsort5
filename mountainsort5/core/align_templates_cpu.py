@@ -45,7 +45,7 @@ def align_templates(templates: npt.NDArray[np.float32]):
                 something_changed = True
                 offsets[k1] = avg_offset
         if not something_changed:
-            print('Template alignment converged.')
+            # print('Template alignment converged.')
             break
-    print('Align templates offsets: ', offsets)
+    # print('Align templates offsets: ', offsets)
     return offsets
